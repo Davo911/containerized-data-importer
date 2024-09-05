@@ -5,15 +5,17 @@ cat "$QUAY_PASSWORD" | docker login --username $(cat "$QUAY_USER") --password-st
 
 #TODO Fix this case
 case $BUILD_ARCH in
-  crossbuild-s390x)
-    export DOCKER_TAG="${build_date}_$(git show -s --format=%h)-s390x"
+  crossbuild-s390x|s390x)
+    echo "gotcha it's Z"
+    #export DOCKER_TAG="${build_date}_$(git show -s --format=%h)-s390x"
     ;;
-  crossbuild-aarch64)
-    export DOCKER_TAG="${build_date}_$(git show -s --format=%h)-arm64"
+  crossbuild-aarch64|aarch64)
+    echo "gotcha it's ARM"
+    #export DOCKER_TAG="${build_date}_$(git show -s --format=%h)-arm64"
     ;;
   *)
-    echo "Invalid BUILD_ARCH value: ${BUILD_ARCH}"
-    exit 1
+    echo "No BUILD_ARCH or ${BUILD_ARCH}"
+    export DOCKER_TAG="${build_date}_$(git show -s --format=%h)"
     ;;
 esac
 
