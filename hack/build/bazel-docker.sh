@@ -32,6 +32,8 @@ DISABLE_SECCOMP=${DISABLE_SECCOMP:-}
 SYNC_OUT=${SYNC_OUT:-true}
 SYNC_VENDOR=${SYNC_VENDOR:-true}
 
+UNIT_TEST=${UNIT_TEST:-false}
+
 # Be less verbose with bazel
 if [ -n "${TRAVIS_JOB_ID}" ]; then
     cat >.bazelrc <<EOF
@@ -129,16 +131,20 @@ if [ -n "$DOCKER_CA_CERT_FILE" ]; then
     volumes="$volumes -v ${DOCKER_CA_CERT_FILE}:${DOCKERIZED_CUSTOM_CA_PATH}:ro,z"
 fi
 
-# Ensure that a bazel server is running
-if [ -z "$(${CDI_CRI} ps --format '{{.Names}}' | grep ${BAZEL_BUILDER_SERVER})" ]; then
+if [ "$UNIT_TEST" != "true" ]; then
+  # Ensure that a bazel server is running
+  if [ -z "$(${CDI_CRI} ps --format '{{.Names}}' | grep ${BAZEL_BUILDER_SERVER})" ]; then
     ${CDI_CRI} run --ulimit nofile=10000:10000 $DISABLE_SECCOMP --network host -d ${volumes} --security-opt label=disable --name ${BAZEL_BUILDER_SERVER} -e "GOPATH=/root/go" -w "/root/go/src/kubevirt.io/containerized-data-importer" --rm ${BUILDER_IMAGE} hack/build/bazel-server.sh
+  fi
+
+  echo "Starting bazel server"
+  # Run the command
+  test -t 1 && USE_TTY="-it"
+  ${CDI_CRI} exec ${USE_TTY} ${BAZEL_BUILDER_SERVER} /entrypoint-bazel.sh "$@"
+else
+  # Run unit tests directly
+  ${CDI_CRI} run --rm ${volumes} --security-opt label=disable -e "GOPATH=/root/go" -w "/root/go/src/kubevirt.io/containerized-data-importer" ${BUILDER_IMAGE} /entrypoint.sh "$@"
 fi
-
-echo "Starting bazel server"
-# Run the command
-test -t 1 && USE_TTY="-it"
-${CDI_CRI} exec ${USE_TTY} ${BAZEL_BUILDER_SERVER} /entrypoint-bazel.sh "$@"
-
 # Copy the whole containerized-data-importer data out to get generated sources and formatting changes
 _rsync \
     --exclude 'bazel-bin' \
