@@ -13,9 +13,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -30,13 +28,14 @@ import (
 )
 
 const (
-	dataImportCronTimeout = 4 * time.Minute
-	scheduleEveryMinute   = "* * * * *"
-	scheduleOnceAYear     = "0 0 1 1 *"
-	importsToKeep         = 1
-	emptySchedule         = ""
-	testKubevirtIoKey     = "test.kubevirt.io/test"
-	testKubevirtIoValue   = "testvalue"
+	dataImportCronTimeout         = 4 * time.Minute
+	dataImportCronConvergeTimeout = 10 * time.Minute
+	scheduleEveryMinute           = "* * * * *"
+	scheduleOnceAYear             = "0 0 1 1 *"
+	importsToKeep                 = 1
+	emptySchedule                 = ""
+	testKubevirtIoKey             = "test.kubevirt.io/test"
+	testKubevirtIoValue           = "testvalue"
 	// Digest must be 64 characters long
 	errorDigest = "sha256:1234567890123456789012345678901234567890123456789012345678901234"
 )
@@ -79,21 +78,28 @@ var _ = Describe("DataImportCron", Serial, func() {
 		By("[AfterEach] Restore the profile")
 		Expect(utils.UpdateStorageProfile(f.CrClient, scName, *originalProfileSpec)).Should(Succeed())
 
-		// Clean up existing dataimportcrons in the environment that we might have switched
-		l, err := labels.Parse(common.DataImportCronLabel)
+		By("[AfterEach] Delete the DataImportCron under test")
+		// Delete the DataImportCron under test
+		_ = f.CdiClient.CdiV1beta1().DataImportCrons(ns).Delete(context.TODO(), cronName, metav1.DeleteOptions{})
+		Eventually(func() bool {
+			_, err := f.CdiClient.CdiV1beta1().DataImportCrons(ns).Get(context.TODO(), cronName, metav1.GetOptions{})
+			return errors.IsNotFound(err)
+		}, dataImportCronTimeout, pollingInterval).Should(BeTrue(), "DataImportCron was not deleted")
+
+		By("[AfterEach] Wait for all DataImportCrons UpToDate")
+		// Wait for all DataImportCrons to converge
+		dataImportCrons := &cdiv1.DataImportCronList{}
+		err = f.CrClient.List(context.TODO(), dataImportCrons, &client.ListOptions{Namespace: metav1.NamespaceAll})
 		Expect(err).ToNot(HaveOccurred())
-		snapshots := &snapshotv1.VolumeSnapshotList{}
-		err = f.CrClient.List(context.TODO(), snapshots, &client.ListOptions{Namespace: metav1.NamespaceAll, LabelSelector: l})
-		Expect(err).To(Or(
-			Not(HaveOccurred()),
-			Satisfy(meta.IsNoMatchError),
-		))
-		for i := range snapshots.Items {
-			err = f.CrClient.Delete(context.TODO(), &snapshots.Items[i])
-			Expect(err).To(Or(
-				Not(HaveOccurred()),
-				Satisfy(meta.IsNoMatchError),
-			))
+		for _, cronItem := range dataImportCrons.Items {
+			Eventually(func() bool {
+				cron, err = f.CdiClient.CdiV1beta1().DataImportCrons(cronItem.Namespace).Get(context.TODO(), cronItem.Name, metav1.GetOptions{})
+				Expect(err).ToNot(HaveOccurred())
+				condProgressing := controller.FindDataImportCronConditionByType(cron, cdiv1.DataImportCronProgressing)
+				condUpToDate := controller.FindDataImportCronConditionByType(cron, cdiv1.DataImportCronUpToDate)
+				return condProgressing != nil && condProgressing.Status == corev1.ConditionFalse &&
+					condUpToDate != nil && condUpToDate.Status == corev1.ConditionTrue
+			}, dataImportCronConvergeTimeout, pollingInterval).Should(BeTrue(), "Timeout waiting for DataImportCron conditions %q", cronItem.Namespace+"/"+cronItem.Name)
 		}
 	})
 
