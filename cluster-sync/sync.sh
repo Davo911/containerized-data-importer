@@ -62,7 +62,7 @@ if [ "${KUBEVIRT_PROVIDER}" == "external" ]; then
 fi
 # Need to set the DOCKER_PREFIX appropriately in the call to `make docker push`, otherwise make will just pass in the default `kubevirt`
 DOCKER_PREFIX=$MANIFEST_REGISTRY PULL_POLICY=$PULL_POLICY make manifests
-DOCKER_PREFIX=$DOCKER_PREFIX make push
+#DOCKER_PREFIX=$DOCKER_PREFIX make push
 
 function kill_running_operator {
   out=$(_kubectl get pods -n $CDI_NAMESPACE)
@@ -316,12 +316,12 @@ else
 fi
 
 # Non external provider extra setup
-if [ "${KUBEVIRT_PROVIDER}" != "external" ]; then
+#if [ "${KUBEVIRT_PROVIDER}" != "external" ]; then
   # Configure CDI upload proxy URL override
-  configure_uploadproxy_override
+configure_uploadproxy_override
   # Tell prometheus to watch our namespace
-  configure_prometheus
-fi
+configure_prometheus
+#fi
 
 # Grab all the CDI crds so we can check if they are structural schemas
 cdi_crds=$(_kubectl get crd -l cdi.kubevirt.io -o jsonpath={.items[*].metadata.name})
