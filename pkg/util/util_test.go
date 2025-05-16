@@ -12,6 +12,51 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+const (
+	TestImagesDir = "../../tests/images"
+	pattern       = "^[a-zA-Z0-9]+$"
+)
+
+var (
+	fileDir, _ = filepath.Abs(TestImagesDir)
+)
+
+var _ = Describe("Copy files", func() {
+	var destTmp string
+	var err error
+
+	BeforeEach(func() {
+		destTmp, err = os.MkdirTemp("", "dest")
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	AfterEach(func() {
+		err = os.RemoveAll(destTmp)
+		Expect(err).NotTo(HaveOccurred())
+		os.Remove("test.txt")
+	})
+
+	It("Should copy file from source to dest, with valid source and dest", func() {
+		err = CopyFile(filepath.Join(TestImagesDir, "content.tar"), filepath.Join(destTmp, "target.tar"))
+		Expect(err).ToNot(HaveOccurred())
+		sourceMd5, err := Md5sum(filepath.Join(TestImagesDir, "content.tar"))
+		Expect(err).ToNot(HaveOccurred())
+		targetMd5, err := Md5sum(filepath.Join(destTmp, "target.tar"))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(sourceMd5).Should(Equal(targetMd5))
+	})
+
+	It("Should not copy file from source to dest, with invalid source", func() {
+		err = CopyFile(filepath.Join(TestImagesDir, "content.tar22"), filepath.Join(destTmp, "target.tar"))
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("Should not copy file from source to dest, with invalid target", func() {
+		err = CopyFile(filepath.Join(TestImagesDir, "content.tar"), filepath.Join("/invalidpath", "target.tar"))
+		Expect(err).To(HaveOccurred())
+	})
+})
+
 var _ = Describe("Util", func() {
 	It("Should match RandAlphaNum", func() {
 		got := RandAlphaNum(8)
@@ -137,4 +182,46 @@ var _ = Describe("Usable Space calculation", func() {
 		Entry("40Gi virtual size, default overhead to be 40Gi if <= 1Gi and 41Gi if > 40Gi", 40*Gi, defaultOverhead),
 		Entry("40Gi virtual size, large overhead to be 40Gi if <= 40Gi and 41Gi if > 40Gi", 40*Gi, largeOverhead),
 	)
+})
+
+var _ = Describe("Merge Labels", func() {
+
+	var (
+		someLabels, emptyLabels, existingLabels, expectedMergedLabels map[string]string
+	)
+
+	BeforeEach(func() {
+		someLabels = map[string]string{
+			"label1": "val1",
+			"label2": "val2",
+			"label3": "val3",
+		}
+		emptyLabels = make(map[string]string)
+		existingLabels = map[string]string{
+			"label4": "val4",
+			"label5": "val5",
+		}
+		expectedMergedLabels = map[string]string{
+			"label1": "val1",
+			"label2": "val2",
+			"label3": "val3",
+			"label4": "val4",
+			"label5": "val5",
+		}
+	})
+
+	DescribeTable("Should properly merge labels", func(original, merged, expected map[string]string) {
+		// copies entries from original to merged
+		MergeLabels(original, merged)
+		Expect(merged).To(HaveLen(len(expected)))
+		for key, val := range merged {
+			Expect(val).To(Equal(expected[key]))
+		}
+	},
+		Entry("original is empty", emptyLabels, someLabels, someLabels),
+		Entry("original has values", someLabels, existingLabels, expectedMergedLabels),
+		Entry("original empty, adding empty", emptyLabels, emptyLabels, emptyLabels),
+		Entry("original has values, adding empty", someLabels, emptyLabels, someLabels),
+	)
+
 })

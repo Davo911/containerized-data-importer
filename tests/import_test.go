@@ -1539,15 +1539,12 @@ var _ = Describe("Import populator", func() {
 			Expect(err).ToNot(HaveOccurred())
 			pvc = nil
 		}
-
-		tests.DisableWebhookPvcRendering(f.CrClient)
 	})
 
 	DescribeTable("should import fileSystem PVC", func(expectedMD5 string, volumeImportSourceFunc func(cdiv1.DataVolumeContentType, bool) error, preallocation, webhookRendering bool) {
 		pvc = importPopulationPVCDefinition()
 
 		if webhookRendering {
-			tests.EnableWebhookPvcRendering(f.CrClient)
 			controller.AddLabel(pvc, common.PvcApplyStorageProfileLabel, "true")
 			// Unset AccessModes which will be set by the webhook rendering
 			pvc.Spec.AccessModes = nil
@@ -1604,7 +1601,7 @@ var _ = Describe("Import populator", func() {
 	},
 		Entry("[test_id:11001]with HTTP image and preallocation", utils.TinyCoreMD5, createHTTPImportPopulatorCR, true, false),
 		Entry("[test_id:11002]with HTTP image without preallocation", utils.TinyCoreMD5, createHTTPImportPopulatorCR, false, false),
-		Entry("[rfe_id:10985][crit:high][test_id:11003]with HTTP image and preallocation, with incomplete PVC webhook rendering", Serial, utils.TinyCoreMD5, createHTTPImportPopulatorCR, true, true),
+		Entry("[rfe_id:10985][crit:high][test_id:11003]with HTTP image and preallocation, with incomplete PVC webhook rendering", utils.TinyCoreMD5, createHTTPImportPopulatorCR, true, true),
 		Entry("[test_id:11004]with Registry image and preallocation", utils.TinyCoreMD5, createRegistryImportPopulatorCR, true, false),
 		Entry("[test_id:11005]with Registry image without preallocation", utils.TinyCoreMD5, createRegistryImportPopulatorCR, false, false),
 		Entry("[test_id:11006]with ImageIO image with preallocation", Label("ImageIO"), Serial, utils.ImageioMD5, createImageIOImportPopulatorCR, true, false),
@@ -2122,6 +2119,55 @@ var _ = Describe("Containerdisk envs to PVC labels", func() {
 		Entry("with pullMethod pod", cdiv1.RegistryPullPod, tinyCoreRegistryURL, false),
 		Entry("with pullMethod node", cdiv1.RegistryPullNode, trustedRegistryURL, false),
 		Entry("with pullMethod node", cdiv1.RegistryPullNode, trustedRegistryIS, true),
+	)
+})
+
+var _ = Describe("Propagate DV Labels to Importer Pod", func() {
+	f := framework.NewFramework(namespacePrefix)
+
+	const (
+		testKubevirtKey    = "test.kubevirt.io/test"
+		testKubevirtValue  = "true"
+		testNonKubevirtKey = "testLabel"
+		testNonKubevirtVal = "none"
+	)
+
+	DescribeTable("Import pod should inherit any labels from Data Volume", func(usePopulator string) {
+
+		dataVolume := utils.NewDataVolumeWithHTTPImport("label-test", "100Mi", fmt.Sprintf(utils.TinyCoreIsoURL, f.CdiInstallNs))
+		dataVolume.Annotations[controller.AnnImmediateBinding] = "true"
+		dataVolume.Annotations[controller.AnnPodRetainAfterCompletion] = "true"
+		dataVolume.Annotations[controller.AnnUsePopulator] = usePopulator
+
+		dataVolume.Labels = map[string]string{
+			testKubevirtKey:    testKubevirtValue,
+			testNonKubevirtKey: testNonKubevirtVal,
+		}
+
+		By(fmt.Sprintf("Create new datavolume %s", dataVolume.Name))
+		dataVolume, err := utils.CreateDataVolumeFromDefinition(f.CdiClient, f.Namespace.Name, dataVolume)
+		Expect(err).ToNot(HaveOccurred())
+
+		By("Verify pvc was created")
+		_, err = utils.WaitForPVC(f.K8sClient, dataVolume.Namespace, dataVolume.Name)
+		Expect(err).ToNot(HaveOccurred())
+
+		By("Wait for import to be completed")
+		err = utils.WaitForDataVolumePhase(f, dataVolume.Namespace, cdiv1.Succeeded, dataVolume.Name)
+		Expect(err).ToNot(HaveOccurred(), "Datavolume not in phase succeeded in time")
+
+		By("Find importer pod")
+		importer, err := utils.FindPodByPrefix(f.K8sClient, dataVolume.Namespace, common.ImporterPodName, common.CDILabelSelector)
+		Expect(err).ToNot(HaveOccurred())
+
+		By("Check labels were appended")
+		importLabels := importer.GetLabels()
+		Expect(importLabels).Should(HaveKeyWithValue(testKubevirtKey, testKubevirtValue))
+		Expect(importLabels).Should(HaveKeyWithValue(testNonKubevirtKey, testNonKubevirtVal))
+
+	},
+		Entry("With Populators", "true"),
+		Entry("Without Populators", "false"),
 	)
 })
 
