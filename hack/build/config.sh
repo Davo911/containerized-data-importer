@@ -27,6 +27,9 @@ FUNC_TEST_REGISTRY_INIT="cdi-func-test-registry-init"
 FUNC_TEST_BAD_WEBSERVER="cdi-func-test-bad-webserver"
 FUNC_TEST_PROXY="cdi-func-test-proxy"
 FUNC_TEST_POPULATOR="cdi-func-test-sample-populator"
+FUNC_TEST_IMAGEIO_INIT="imageio-init"
+FUNC_TEST_IMAGEIO="cdi-func-test-imageio"
+FUNC_TEST_VCENTER_SIMULATOR="vcenter-simulator"
 
 # update this whenever new builder tag is created
 BUILDER_IMAGE=${BUILDER_IMAGE:-quay.io/kubevirt/kubevirt-cdi-bazel-builder:2503021312-67d1f3d4d}
